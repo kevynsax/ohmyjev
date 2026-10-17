@@ -34,7 +34,7 @@ const resolveFake = (path: string): string => {
 
 /** Lets fire-and-forget work settle: the harness answers everything from memory. */
 export const flush = async (): Promise<void> => {
-  for (let i = 0; i < 50; i++) await Promise.resolve()
+  for (let i = 0; i < 100; i++) await Promise.resolve() // room for the cpamc env reads in keyOf
 }
 
 /** Stands in for the engine beneath the plugin: env, session, fs, process, and Jev over http. */

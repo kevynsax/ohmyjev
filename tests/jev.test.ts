@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { JevError, parseReply, pickKey, validate } from '../hooks/jev.ts'
+import { JevError, endpointOf, parseReply, pickKey, validate } from '../hooks/jev.ts'
 import { noul } from '../hooks/policy.ts'
 
 const Q = { q: { type: 'choice' as const, instructions: 'x', criteria: { a: 'A', b: 'B' } } }
@@ -22,6 +22,18 @@ test('key order: config, then TYPESAFE, then OPENROUTER; the model follows the p
   expect(pickKey('', 'jev-1.13.0', 'ts', 'or')).toMatchObject({ source: 'env TYPESAFE_API_KEY', model: 'jev-1.13.0' })
   expect(pickKey('', 'jev-1.13.0', undefined, 'or')).toMatchObject({ provider: 'openrouter', model: '~typesafe/jev-latest' })
   expect(pickKey('', 'jev-1.13.0')).toBe(null)
+})
+
+test('a cpamc gateway wins over every other key and posts to its /v1/decisions', () => {
+  const gw = { key: 'gw', base: 'https://gw.test' }
+  expect(pickKey('cfg', 'jev-1.13.0', 'ts', 'or', gw)).toMatchObject({
+    provider: 'cpamc', source: 'env CPAMC_API_KEY', model: 'typesafe/jev-1.14', url: 'https://gw.test/v1/decisions',
+  })
+  expect(pickKey('', 'openrouter/jev-1.14', undefined, undefined, { key: 'gw', base: 'https://gw.test/v1/' })?.url).toBe('https://gw.test/v1/decisions')
+  expect(pickKey('', 'openrouter/jev-1.14', undefined, undefined, gw)?.model).toBe('openrouter/jev-1.14')
+  expect(pickKey('', 'jev-1.13.0', 'ts', undefined, { key: 'gw' })?.provider).toBe('typesafe')
+  const k = pickKey('', 'jev-1.13.0', 'ts')!
+  expect(endpointOf(k)).toBe('https://api.typesafe.ai/v1/systemone')
 })
 
 test('parseReply: non-2xx, non-JSON, usage', () => {

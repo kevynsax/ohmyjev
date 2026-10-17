@@ -715,7 +715,9 @@ export const BROWSE_DESCRIPTION =
   'Do a task in a real browser tab, fast: Jev picks each click, field and option from the page\'s controls (about one ' +
   'second per step). Give a starting URL and one narrow goal, like "find one-way flights Zurich to London on Sept 20, ' +
   'stop when results show" or "open the install section of these docs", with the text to type in `values`. Returns ' +
-  'where it ended, the steps taken and the visible text. Runs in its own headless browser, signed in to nothing. Use WebFetch for a page you only need to read.'
+  'where it ended, the steps taken and the visible text. With OHMYJEV_BROWSE_CHROME=user it works in a new background ' +
+  'tab of the user\'s own Chrome (their sign-ins); otherwise in its own headless browser, signed in to nothing. Use WebFetch ' +
+  'for a page you only need to read.'
 export const BROWSE_SCHEMA = {
   type: 'object',
   properties: {
@@ -729,6 +731,13 @@ export const BROWSE_SCHEMA = {
   },
   required: ['url', 'goal'],
 } as const
+
+/** cpamc gateway for browse: origin from $CPAMC_BASE_URL, same rules as cpamcKey in jev.ts (policy.ts stays import-free). */
+function cpamcKey(jevModel: string, key?: string, base?: string): { key: string; url: string; model: string } | null {
+  if (!key || !base) return null
+  const origin = base.trim().replace(/\/+$/, '').replace(/\/v1$/, '')
+  return { key, url: `${origin}/v1/decisions`, model: jevModel.includes('/') ? jevModel : 'typesafe/jev-1.14' }
+}
 
 /** Runs one jev-ultrafast Agent and prints one JSON line: where it ended, its steps, the visible text; or an error. */
 const BROWSE_PY = `
@@ -767,7 +776,8 @@ def headless():
 
 def pick_value(context):
     # No text model: Jev picks, from the values the coding agent gave, the one this field needs.
-    from jev_ultrafast.model import post_json
+    import jev_ultrafast.model as _m
+    post_json = _m.post_json
     values = json.loads(os.environ.get("OMJ_BROWSE_VALUES") or "[]")
     criteria = {f"v{i}": v for i, v in enumerate(values)}
     criteria["none"] = "None of these is what this field needs"
@@ -779,9 +789,24 @@ def pick_value(context):
         raise ValueError("no given value fits the field " + json.dumps(context["field"].get("label")) + "; pass the text it needs in values")
     return criteria[answer], {"model": "jev (picked from values)", "latency_ms": round((time.time() - started) * 1000), "usage": {}}
 
+def route_to_cpamc():
+    # jev-ultrafast posts TypeSafe's native body to api.typesafe.ai; a cpamc gateway serves the same body on /v1/decisions.
+    base = os.environ.get("OMJ_JEV_URL")
+    if not base: return
+    import jev_ultrafast.model as model
+    original = model.post_json
+    def post_json(url, key, body):
+        if url.startswith("https://api.typesafe.ai/"):
+            body = dict(body, model=os.environ.get("OMJ_JEV_MODEL") or body.get("model"))
+            return original(base, os.environ["OMJ_JEV_KEY"], body)
+        return original(url, key, body)
+    model.post_json = post_json
+
 proc = None
 try:
-    if not (os.environ.get("BU_CDP_URL") or os.environ.get("BU_CDP_WS")): proc = headless()
+    user_chrome = os.environ.get("OHMYJEV_BROWSE_CHROME") == "user"
+    if not user_chrome and not (os.environ.get("BU_CDP_URL") or os.environ.get("BU_CDP_WS")): proc = headless()
+    route_to_cpamc()
     from jev_ultrafast import Agent
     import jev_ultrafast.agent
     if not os.environ.get("TEXT_MODEL_API_KEY"): jev_ultrafast.agent.field_text = pick_value
@@ -811,17 +836,22 @@ export function browseCommand(
   const goal = typeof input.goal === 'string' ? input.goal.trim() : ''
   if (!/^https?:\/\/\S+$/i.test(url)) return 'url must be an http(s) URL'
   if (!goal) return 'goal is required'
-  const typesafe = c.apiKey || env.TYPESAFE_API_KEY
-  if (!typesafe) return 'browse needs a TypeSafe key (TYPESAFE_API_KEY or the apiKey setting); OpenRouter does not serve its requests'
+  const gateway = cpamcKey(c.jevModel, env.CPAMC_API_KEY, env.CPAMC_BASE_URL)
+  const typesafe = gateway ? gateway.key : c.apiKey || env.TYPESAFE_API_KEY
+  if (!typesafe) return 'browse needs a Jev key: CPAMC_API_KEY + CPAMC_BASE_URL, TYPESAFE_API_KEY or the apiKey setting'
   const text: Record<string, string> = env.TEXT_MODEL_API_KEY
     ? { TEXT_MODEL_API_KEY: env.TEXT_MODEL_API_KEY }
-    : env.OPENROUTER_API_KEY
-      ? { TEXT_MODEL_API_KEY: env.OPENROUTER_API_KEY, TEXT_MODEL_BASE_URL: 'https://openrouter.ai/api/v1', TEXT_MODEL: 'inception/mercury-2.5', TEXT_MODEL_REASONING: 'none' }
-      : {}
+    : gateway
+      ? { TEXT_MODEL_API_KEY: gateway.key, TEXT_MODEL_BASE_URL: gateway.url!.replace(/\/decisions$/, ''), TEXT_MODEL: env.CPAMC_TEXT_MODEL || 'glm-5.3-flash', TEXT_MODEL_REASONING: 'none' }
+      : env.OPENROUTER_API_KEY
+        ? { TEXT_MODEL_API_KEY: env.OPENROUTER_API_KEY, TEXT_MODEL_BASE_URL: 'https://openrouter.ai/api/v1', TEXT_MODEL: 'inception/mercury-2.5', TEXT_MODEL_REASONING: 'none' }
+        : {}
+  const routing: Record<string, string> = gateway ? { OMJ_JEV_URL: gateway.url!, OMJ_JEV_KEY: gateway.key, OMJ_JEV_MODEL: gateway.model } : {}
+  const chrome: Record<string, string> = env.OHMYJEV_BROWSE_CHROME ? { OHMYJEV_BROWSE_CHROME: env.OHMYJEV_BROWSE_CHROME } : {}
   return {
     // uv's own Python: a PATH python can be the wrong architecture or version (an Intel python3.13 on Apple silicon)
     argv: ['uv', 'run', '--no-project', '--quiet', '--python-preference', 'only-managed', '--python', '3.12', '--with', JEV_ULTRAFAST, 'python', '-c', BROWSE_PY, url, goal],
-    env: { TYPESAFE_API_KEY: typesafe, ...text, ...(Array.isArray(input.values) ? { OMJ_BROWSE_VALUES: JSON.stringify(input.values.filter(v => typeof v === 'string').slice(0, 20)) } : {}) },
+    env: { TYPESAFE_API_KEY: typesafe, ...text, ...routing, ...chrome, ...(Array.isArray(input.values) ? { OMJ_BROWSE_VALUES: JSON.stringify(input.values.filter(v => typeof v === 'string').slice(0, 20)) } : {}) },
   }
 }
 

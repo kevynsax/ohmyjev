@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process'
 import { appendFile, chmod, lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
 import { find, sweep, type CodeIO } from '../hooks/code.ts'
 import { dashboardHtml } from '../hooks/dashboard.ts'
-import { ENDPOINTS, JevError, parseReply, pickKey, type Key } from '../hooks/jev.ts'
+import { JevError, endpointOf, parseReply, pickKey, type Key } from '../hooks/jev.ts'
 import {
   BROWSE_TIMEOUT_MS, DASHBOARD, EMPTY_SESSION, EXFIL_Q, SCREEN_Q, browseCommand, browseReply, denyText, gateExfil, screen, withPolicies, withPolicyQ, absolute, buildQuestion, clip, expandRoot, hostPath, isUnder, normalize, parseLog, parseWorktrees, rawAbsolute, sanitizeSid,
   STUCK_Q, maskSecrets, trimChunks, trimRequest, trimmed, failureOf, judgeStuck, stuckDue, stuckState, splitList, statusText, summarize, type Failure, type Answers, type Config, type LogEntry, type Questions, type SessionState, type Verdict,
@@ -17,7 +17,8 @@ export type Env = Readonly<Record<string, string | undefined>>
 const DOWN_MS = 5 * 60_000
 
 /** Config apiKey, then $TYPESAFE_API_KEY, then $OPENROUTER_API_KEY; null when none is set. */
-export const keyOf = (c: Config, env: Env): Key | null => pickKey(c.apiKey, c.jevModel, env.TYPESAFE_API_KEY, env.OPENROUTER_API_KEY)
+export const keyOf = (c: Config, env: Env): Key | null =>
+  pickKey(c.apiKey, c.jevModel, env.TYPESAFE_API_KEY, env.OPENROUTER_API_KEY, { key: env.CPAMC_API_KEY, base: env.CPAMC_BASE_URL })
 
 /** The one fetch shape ohmyjev uses; tests pass a fake. */
 export type Fetch = (url: string, init: RequestInit) => Promise<Response>
@@ -30,7 +31,7 @@ export async function askJev(c: Config, env: Env, raw: unknown, questions: Quest
   const started = Date.now()
   let res: { ok: boolean; status: number; text: string }
   try {
-    const r = await fetchImpl(ENDPOINTS[k.provider], {
+    const r = await fetchImpl(endpointOf(k), {
       method: 'POST',
       headers: { authorization: `Bearer ${k.key}`, 'content-type': 'application/json' },
       body: JSON.stringify({ model: k.model, state, questions }),

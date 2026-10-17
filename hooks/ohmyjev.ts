@@ -7,7 +7,7 @@ import { FIND_DESCRIPTION, FIND_SCHEMA, find, narrowNote, narrowRead, sweep, typ
 import { HEADER as COMPACT_HEADER, judgeable, select, type Block } from './compact.ts'
 import { MIN_REPLY, broken, extractionPrompt, filesHash, parseRules, rewriteReason, ruleQuestions, type Rule } from './prose.ts'
 import { dashboardHtml } from './dashboard.ts'
-import { ENDPOINTS, JevError, parseReply, pickKey, type Key } from './jev.ts'
+import { JevError, endpointOf, parseReply, pickKey, type Key } from './jev.ts'
 import {
   BASH_Q, EXFIL_Q, ROUTE_Q, SCREEN_Q, STOP_Q, SWITCHED_Q, WRITE_Q,
   EMPTY_SESSION, absolute, clip, denyText, expandRoot, gateBash, gateExfil, gateWrite, hostPath, isUnder, judgeStop, normalize, parseWorktrees, pathDenyText, rawAbsolute,
@@ -61,6 +61,12 @@ const TIMEOUT = Symbol('timeout')
 
 /** Config apiKey, then $TYPESAFE_API_KEY, then $OPENROUTER_API_KEY; null when none is set. */
 async function keyOf($: $, c: Config): Promise<Key | null> {
+  // The gateway pair is read only when CPAMC_BASE_URL is set; without it this costs the original two env reads plus one.
+  const base = await $.env.get('CPAMC_BASE_URL')
+  if (base) {
+    const gateway = pickKey('', c.jevModel, undefined, undefined, { key: await $.env.get('CPAMC_API_KEY'), base })
+    if (gateway) return gateway
+  }
   return pickKey(c.apiKey, c.jevModel, await $.env.get('TYPESAFE_API_KEY'), await $.env.get('OPENROUTER_API_KEY'))
 }
 
@@ -70,7 +76,7 @@ async function askJev($: $, c: Config, raw: unknown, questions: Questions, timeo
   if (!k) throw new JevError('no key', true)
   const state = c.maskSecrets ? maskSecrets(raw, (await $.env.get('HOME')) ?? '') : raw
   const started = Date.now()
-  const request = $.http.fetch(ENDPOINTS[k.provider], {
+  const request = $.http.fetch(endpointOf(k), {
     method: 'POST',
     headers: { authorization: `Bearer ${k.key}`, 'content-type': 'application/json' },
     body: JSON.stringify({ model: k.model, state, questions }),
@@ -561,6 +567,10 @@ async function runBrowse($: $, e: Record<string, unknown>): Promise<ToolCallResu
     TYPESAFE_API_KEY: await $.env.get('TYPESAFE_API_KEY'),
     OPENROUTER_API_KEY: await $.env.get('OPENROUTER_API_KEY'),
     TEXT_MODEL_API_KEY: await $.env.get('TEXT_MODEL_API_KEY'),
+    CPAMC_API_KEY: await $.env.get('CPAMC_API_KEY'),
+    CPAMC_BASE_URL: await $.env.get('CPAMC_BASE_URL'),
+    CPAMC_TEXT_MODEL: await $.env.get('CPAMC_TEXT_MODEL'),
+    OHMYJEV_BROWSE_CHROME: await $.env.get('OHMYJEV_BROWSE_CHROME'),
   }
   const cmd = browseCommand(e, c, env)
   if (typeof cmd === 'string') return reply(JSON.stringify({ error: cmd }))

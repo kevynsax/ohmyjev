@@ -13,12 +13,32 @@ export class JevError extends Error {
 export const ENDPOINTS = {
   typesafe: 'https://api.typesafe.ai/v1/systemone',
   openrouter: 'https://openrouter.ai/api/alpha/decisions',
+  cpamc: '',
 } as const
 export type Provider = keyof typeof ENDPOINTS
-export type Key = { provider: Provider; key: string; source: string; model: string }
+export type Key = { provider: Provider; key: string; source: string; model: string; url?: string }
 
-/** Config apiKey, then $TYPESAFE_API_KEY, then $OPENROUTER_API_KEY; the model goes with the provider. */
-export function pickKey(apiKey: string, jevModel: string, ts?: string, or?: string): Key | null {
+/** cpamc gateway model when the config still holds a TypeSafe id (jev-1.13.0) or nothing. */
+export const CPAMC_DEFAULT_MODEL = 'typesafe/jev-1.14'
+
+/** The URL a key posts to: cpamc keys carry their own, the others use the fixed endpoints. */
+export const endpointOf = (k: Key): string => k.url ?? ENDPOINTS[k.provider]
+
+/**
+ * A cpamc gateway (OpenAI-compatible proxy with a native /v1/decisions route): $CPAMC_API_KEY with
+ * $CPAMC_BASE_URL (the gateway origin or its /v1). Wins over every other key so a team shares one upstream key.
+ */
+export function cpamcKey(jevModel: string, key?: string, base?: string): Key | null {
+  if (!key || !base) return null
+  const origin = base.trim().replace(/\/+$/, '').replace(/\/v1$/, '')
+  const model = jevModel.includes('/') ? jevModel : CPAMC_DEFAULT_MODEL
+  return { provider: 'cpamc', key, source: 'env CPAMC_API_KEY', model, url: `${origin}/v1/decisions` }
+}
+
+/** $CPAMC_API_KEY + $CPAMC_BASE_URL, then config apiKey, then $TYPESAFE_API_KEY, then $OPENROUTER_API_KEY. */
+export function pickKey(apiKey: string, jevModel: string, ts?: string, or?: string, cpamc?: { key?: string; base?: string }): Key | null {
+  const gateway = cpamcKey(jevModel, cpamc?.key, cpamc?.base)
+  if (gateway) return gateway
   if (apiKey) return { provider: 'typesafe', key: apiKey, source: 'config apiKey', model: jevModel }
   if (ts) return { provider: 'typesafe', key: ts, source: 'env TYPESAFE_API_KEY', model: jevModel }
   if (or) return { provider: 'openrouter', key: or, source: 'env OPENROUTER_API_KEY', model: '~typesafe/jev-latest' }

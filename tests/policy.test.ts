@@ -209,7 +209,7 @@ test('browseCommand checks its input and keys; browseReply explains failures', (
   const env = { TYPESAFE_API_KEY: 'ts', OPENROUTER_API_KEY: 'or' }
   expect(browseCommand({ url: 'ftp://x', goal: 'g' }, c, env)).toBe('url must be an http(s) URL')
   expect(browseCommand({ url: 'https://x.test', goal: ' ' }, c, env)).toBe('goal is required')
-  expect(browseCommand({ url: 'https://x.test', goal: 'g' }, c, { OPENROUTER_API_KEY: 'or' })).toContain('needs a TypeSafe key')
+  expect(browseCommand({ url: 'https://x.test', goal: 'g' }, c, { OPENROUTER_API_KEY: 'or' })).toContain('needs a Jev key')
   const cmd = browseCommand({ url: 'https://x.test', goal: 'g' }, c, env) as { argv: string[]; env: Record<string, string> }
   expect(cmd.argv.slice(0, 2)).toEqual(['uv', 'run'])
   expect(cmd.argv.join(' ')).toContain('jev-ultrafast@')
@@ -219,6 +219,26 @@ test('browseCommand checks its input and keys; browseReply explains failures', (
   expect(JSON.parse(one.env.OMJ_BROWSE_VALUES!)).toEqual(['Zurich', 'London'])
   expect(browseReply('{"status":"done"}')).toBe('{"status":"done"}')
   expect(browseReply('', 'spawn uv ENOENT')).toContain('uv is not installed')
+})
+
+test('browseCommand through a cpamc gateway: one shared key for Jev and typing, and the user\'s Chrome', () => {
+  const env = { CPAMC_API_KEY: 'gw', CPAMC_BASE_URL: 'https://gw.test/v1/', TYPESAFE_API_KEY: 'ts', OHMYJEV_BROWSE_CHROME: 'user' }
+  const cmd = browseCommand({ url: 'https://x.test', goal: 'g' }, c, env) as { env: Record<string, string> }
+  expect(cmd.env).toMatchObject({
+    TYPESAFE_API_KEY: 'gw',
+    OMJ_JEV_URL: 'https://gw.test/v1/decisions',
+    OMJ_JEV_KEY: 'gw',
+    OMJ_JEV_MODEL: 'typesafe/jev-1.14',
+    TEXT_MODEL_API_KEY: 'gw',
+    TEXT_MODEL_BASE_URL: 'https://gw.test/v1',
+    TEXT_MODEL: 'glm-5.3-flash',
+    OHMYJEV_BROWSE_CHROME: 'user',
+  })
+  const named = browseCommand({ url: 'https://x.test', goal: 'g' }, { ...c, jevModel: 'openrouter/jev-1.14' }, env) as { env: Record<string, string> }
+  expect(named.env.OMJ_JEV_MODEL).toBe('openrouter/jev-1.14')
+  const plain = browseCommand({ url: 'https://x.test', goal: 'g' }, c, { TYPESAFE_API_KEY: 'ts' }) as { env: Record<string, string> }
+  expect(plain.env.OMJ_JEV_URL).toBe(undefined)
+  expect(plain.env.OHMYJEV_BROWSE_CHROME).toBe(undefined)
 })
 
 test('stuck check timing and judge', () => {
