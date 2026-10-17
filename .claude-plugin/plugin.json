@@ -344,6 +344,24 @@
       "description": "Give the model a browse tool: jev-ultrafast does a task in your Chrome, Jev picking each step. Needs uv, Chrome remote debugging, and OPENROUTER_API_KEY to type into fields",
       "default": false
     },
+    "browseChrome": {
+      "type": "string",
+      "title": "browse: which Chrome",
+      "description": "user drives a background tab of your own Chrome (your sign-ins; turn on chrome://inspect/#remote-debugging and click Allow once per Chrome restart); headless uses a fresh browser signed in to nothing",
+      "default": "headless"
+    },
+    "cpamcBaseUrl": {
+      "type": "string",
+      "title": "cpamc gateway URL",
+      "description": "cpamc gateway origin for Jev calls and browse typing, e.g. https://ai-models.kevyn.com.br. The key comes from CPAMC_API_KEY or pi's cpamc provider",
+      "default": ""
+    },
+    "cpamcTextModel": {
+      "type": "string",
+      "title": "cpamc text model",
+      "description": "Gateway model that writes field values for browse",
+      "default": "glm-5.3-flash"
+    },
     "logDecisions": {
       "type": "boolean",
       "title": "Show decisions in the transcript",

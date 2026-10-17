@@ -38,6 +38,12 @@ export const DEFAULTS = {
   approveRiskMax: 0.2,
   askJev: true,
   browse: false,
+  /** 'user' drives a background tab of the user's own Chrome; 'headless' a fresh browser signed in to nothing. */
+  browseChrome: 'headless',
+  /** cpamc gateway origin for Jev and browse typing, e.g. https://ai-models.kevyn.com.br. Empty: env CPAMC_BASE_URL. */
+  cpamcBaseUrl: '',
+  /** Text model on the gateway that writes field values for browse. */
+  cpamcTextModel: 'glm-5.3-flash',
   findCode: true,
   fastCompact: true,
   subagentCheck: true,
@@ -603,7 +609,7 @@ export const SECTIONS = {
   speed: ['autoApprove', 'trimOutput', 'skillPick', 'readNarrow', 'approveConfidence', 'approveRiskMax', 'trimOver', 'trimKeep', 'skillGate', 'skillMin'],
   compaction: ['fastCompact', 'autoCompact', 'compactSwitched', 'compactBoundary', 'compactMinPercent'],
   router: ['routeEffort', 'routeSubagents', 'routeMainModel', 'routeWithoutKey', 'fastModel', 'balancedModel', 'deepModel', 'routeUpgrade', 'routeDowngrade', 'routeRisky'],
-  tools: ['askJev', 'findCode', 'browse'],
+  tools: ['askJev', 'findCode', 'browse', 'browseChrome', 'cpamcBaseUrl', 'cpamcTextModel'],
   display: ['logDecisions', 'statusLine'],
 } as const satisfies Record<string, readonly (keyof Config)[]>
 export type Section = keyof typeof SECTIONS
@@ -836,18 +842,19 @@ export function browseCommand(
   const goal = typeof input.goal === 'string' ? input.goal.trim() : ''
   if (!/^https?:\/\/\S+$/i.test(url)) return 'url must be an http(s) URL'
   if (!goal) return 'goal is required'
-  const gateway = cpamcKey(c.jevModel, env.CPAMC_API_KEY, env.CPAMC_BASE_URL)
+  const gateway = cpamcKey(c.jevModel, env.CPAMC_API_KEY, env.CPAMC_BASE_URL || c.cpamcBaseUrl)
   const typesafe = gateway ? gateway.key : c.apiKey || env.TYPESAFE_API_KEY
   if (!typesafe) return 'browse needs a Jev key: CPAMC_API_KEY + CPAMC_BASE_URL, TYPESAFE_API_KEY or the apiKey setting'
   const text: Record<string, string> = env.TEXT_MODEL_API_KEY
     ? { TEXT_MODEL_API_KEY: env.TEXT_MODEL_API_KEY }
     : gateway
-      ? { TEXT_MODEL_API_KEY: gateway.key, TEXT_MODEL_BASE_URL: gateway.url!.replace(/\/decisions$/, ''), TEXT_MODEL: env.CPAMC_TEXT_MODEL || 'glm-5.3-flash', TEXT_MODEL_REASONING: 'none' }
+      ? { TEXT_MODEL_API_KEY: gateway.key, TEXT_MODEL_BASE_URL: gateway.url!.replace(/\/decisions$/, ''), TEXT_MODEL: env.CPAMC_TEXT_MODEL || c.cpamcTextModel || 'glm-5.3-flash', TEXT_MODEL_REASONING: 'none' }
       : env.OPENROUTER_API_KEY
         ? { TEXT_MODEL_API_KEY: env.OPENROUTER_API_KEY, TEXT_MODEL_BASE_URL: 'https://openrouter.ai/api/v1', TEXT_MODEL: 'inception/mercury-2.5', TEXT_MODEL_REASONING: 'none' }
         : {}
   const routing: Record<string, string> = gateway ? { OMJ_JEV_URL: gateway.url!, OMJ_JEV_KEY: gateway.key, OMJ_JEV_MODEL: gateway.model } : {}
-  const chrome: Record<string, string> = env.OHMYJEV_BROWSE_CHROME ? { OHMYJEV_BROWSE_CHROME: env.OHMYJEV_BROWSE_CHROME } : {}
+  const browser = env.OHMYJEV_BROWSE_CHROME || c.browseChrome
+  const chrome: Record<string, string> = browser === 'user' ? { OHMYJEV_BROWSE_CHROME: 'user' } : {}
   return {
     // uv's own Python: a PATH python can be the wrong architecture or version (an Intel python3.13 on Apple silicon)
     argv: ['uv', 'run', '--no-project', '--quiet', '--python-preference', 'only-managed', '--python', '3.12', '--with', JEV_ULTRAFAST, 'python', '-c', BROWSE_PY, url, goal],

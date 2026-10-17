@@ -241,6 +241,15 @@ test('browseCommand through a cpamc gateway: one shared key for Jev and typing, 
   expect(plain.env.OHMYJEV_BROWSE_CHROME).toBe(undefined)
 })
 
+test('browse settings: browseChrome and cpamcBaseUrl work without env exports; env still wins', () => {
+  const s = { ...c, browseChrome: 'user', cpamcBaseUrl: 'https://gw.test' }
+  const cmd = browseCommand({ url: 'https://x.test', goal: 'g' }, s, { CPAMC_API_KEY: 'gw' }) as { env: Record<string, string> }
+  expect(cmd.env).toMatchObject({ OMJ_JEV_URL: 'https://gw.test/v1/decisions', OHMYJEV_BROWSE_CHROME: 'user', TEXT_MODEL: 'glm-5.3-flash' })
+  const envWins = browseCommand({ url: 'https://x.test', goal: 'g' }, s, { CPAMC_API_KEY: 'gw', CPAMC_BASE_URL: 'https://env.test', OHMYJEV_BROWSE_CHROME: 'headless' }) as { env: Record<string, string> }
+  expect(envWins.env.OMJ_JEV_URL).toBe('https://env.test/v1/decisions')
+  expect(envWins.env.OHMYJEV_BROWSE_CHROME).toBe(undefined)
+})
+
 test('stuck check timing and judge', () => {
   expect([2, 3, 4, 5, 6].map(n => stuckDue(n, 0))).toEqual([false, true, true, true, true])
   expect(stuckDue(5, 3)).toBe(false)

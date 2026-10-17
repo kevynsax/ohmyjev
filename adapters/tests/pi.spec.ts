@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TIER_LABELS } from '../../hooks/policy.ts'
-import { createExtension, type PiContext, type PiExtensionAPI, type ThinkingLevel } from '../pi.ts'
+import { createExtension, type PiContext, type PiExtensionAPI, type ThinkingLevel, withPiGatewayKey } from '../pi.ts'
 import type { Fetch } from '../shared.ts'
 
 type Handler = Parameters<PiExtensionAPI['on']>[1]
@@ -405,5 +405,26 @@ describe('Pi router', () => {
 
     expect(selected).toBe(plain)
     expect(signal?.aborted).toBeTrue()
+  })
+})
+
+describe('cpamc gateway from pi models.json', () => {
+  const models = (provider: Record<string, unknown>) => async () => JSON.stringify({ providers: { cpamc: provider } })
+
+  test('fills CPAMC_API_KEY and CPAMC_BASE_URL when the env has none', async () => {
+    const env = await withPiGatewayKey({ HOME: '/h' }, models({ apiKey: 'gw-key', baseUrl: 'https://gw.test/v1' }))
+    expect(env).toMatchObject({ CPAMC_API_KEY: 'gw-key', CPAMC_BASE_URL: 'https://gw.test/v1' })
+  })
+
+  test('an exported key wins, and an exported base url is kept', async () => {
+    const read = models({ apiKey: 'gw-key', baseUrl: 'https://gw.test/v1' })
+    expect((await withPiGatewayKey({ HOME: '/h', CPAMC_API_KEY: 'mine' }, read)).CPAMC_API_KEY).toBe('mine')
+    expect((await withPiGatewayKey({ HOME: '/h', CPAMC_BASE_URL: 'https://other.test' }, read)).CPAMC_BASE_URL).toBe('https://other.test')
+  })
+
+  test('no cpamc provider, an env-reference key, or no models.json leaves the env alone', async () => {
+    expect((await withPiGatewayKey({ HOME: '/h' }, async () => '{"providers":{}}')).CPAMC_API_KEY).toBe(undefined)
+    expect((await withPiGatewayKey({ HOME: '/h' }, models({ apiKey: '$CPAMC_KEY', baseUrl: 'https://gw.test/v1' }))).CPAMC_API_KEY).toBe(undefined)
+    expect((await withPiGatewayKey({ HOME: '/h' }, async () => { throw new Error('ENOENT') })).CPAMC_API_KEY).toBe(undefined)
   })
 })

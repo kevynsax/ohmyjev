@@ -250,9 +250,27 @@ async function classifyBuiltin(ctx: PiContext, c: Config, request: string): Prom
   return builtinRoute(label)
 }
 
+/**
+ * Sessions started outside a login shell (desktop apps, old terminals) miss CPAMC_* exports. pi already knows the
+ * gateway: a models.json provider named cpamc. Use its baseUrl and apiKey when the env has no CPAMC_API_KEY.
+ */
+export async function withPiGatewayKey(env: Env, read: (path: string) => Promise<string> = p => readFile(p, 'utf8')): Promise<Env> {
+  if (env.CPAMC_API_KEY || !env.HOME) return env
+  try {
+    const models = entry(JSON.parse(await read(`${env.HOME}/.pi/agent/models.json`)))
+    const provider = entry(entry(models.providers).cpamc)
+    const key = typeof provider.apiKey === 'string' ? provider.apiKey.trim() : ''
+    const base = typeof provider.baseUrl === 'string' ? provider.baseUrl.trim() : ''
+    if (!key || key.startsWith('$') || !base) return env
+    return { ...env, CPAMC_API_KEY: key, CPAMC_BASE_URL: env.CPAMC_BASE_URL || base }
+  } catch {
+    return env
+  }
+}
+
 export function createExtension(options: PiAdapterOptions = {}) {
   return async (pi: PiExtensionAPI): Promise<void> => {
-    const env: Env = options.env ?? process.env
+    const env: Env = await withPiGatewayKey(options.env ?? process.env)
     // Claude Code started by pi-claude-bridge inherits this, and leaves pi's bridged tools to this copy (it runs them).
     process.env.OHMYJEV_PI = '1'
     const initialCwd = options.cwd ?? process.cwd()
